@@ -4,5 +4,7 @@ from tasks import views
 
 router = DefaultRouter()
 router.register(r"tasks", views.TaskViewSet, basename="task")
+router.register(r"comments", views.CommentViewSet, basename="comment")
+router.register(r"likes", views.LikeViewSet, basename="like")
 
 urlpatterns = router.urls

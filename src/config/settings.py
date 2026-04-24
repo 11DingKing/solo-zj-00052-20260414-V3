@@ -36,6 +36,7 @@ ALLOWED_HOSTS = list(map(str.strip, allowed_hosts.split(",")))
 INSTALLED_APPS = [
     "pages.apps.PagesConfig",
     "tasks.apps.TasksConfig",
+    "notifications.apps.NotificationsConfig",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -179,6 +180,13 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 USE_L10N = True
 USE_TZ = True
+
+# Django REST Framework
+# https://www.django-rest-framework.org/
+REST_FRAMEWORK = {
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+}
 
 # Django Debug Toolbar
 # https://django-debug-toolbar.readthedocs.io/
