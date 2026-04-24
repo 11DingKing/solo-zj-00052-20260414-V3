@@ -33,10 +33,14 @@ class CommentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         comment = serializer.save(user=self.request.user)
-        send_comment_notification.delay(
-            comment_id=comment.id,
-            actor_id=self.request.user.id,
-        )
+        task = comment.task
+        
+        if task.user and task.user.id != self.request.user.id:
+            send_comment_notification.delay(
+                task_id=task.id,
+                actor_id=self.request.user.id,
+                comment_id=comment.id,
+            )
 
 
 class LikeViewSet(viewsets.ModelViewSet):
@@ -51,10 +55,14 @@ class LikeViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         like = serializer.save(user=self.request.user)
-        send_like_notification.delay(
-            like_id=like.id,
-            actor_id=self.request.user.id,
-        )
+        task = like.task
+        
+        if task.user and task.user.id != self.request.user.id:
+            send_like_notification.delay(
+                task_id=task.id,
+                actor_id=self.request.user.id,
+                like_id=like.id,
+            )
 
     @action(detail=False, methods=["post"])
     def toggle(self, request):
@@ -82,10 +90,12 @@ class LikeViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        send_like_notification.delay(
-            like_id=like.id,
-            actor_id=request.user.id,
-        )
+        if task.user and task.user.id != request.user.id:
+            send_like_notification.delay(
+                task_id=task.id,
+                actor_id=request.user.id,
+                like_id=like.id,
+            )
 
         serializer = self.get_serializer(like)
         return Response(

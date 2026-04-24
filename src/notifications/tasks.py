@@ -2,6 +2,8 @@ import logging
 
 from celery import shared_task
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.utils import timezone
 
 from notifications.models import Notification
 
@@ -18,12 +20,13 @@ def send_notification_task(
     object_id,
 ):
     """
-    Asynchronously create a notification.
-    This ensures the notification doesn't block the main request.
+    Asynchronously create or update a notification.
     
     Business rules:
     1. User cannot receive notification from their own action
-    2. Same action cannot trigger duplicate notification
+    2. Same action (same actor + same recipient + same type + same object) only keeps the latest one
+       - If exists, update is_read=False and created_at to now
+       - If not exists, create new
     """
     try:
         recipient = User.objects.get(id=recipient_id)
@@ -35,21 +38,29 @@ def send_notification_task(
             )
             return
 
-        notification, created = Notification.objects.get_or_create(
-            recipient=recipient,
-            actor=actor,
-            notification_type=notification_type,
-            object_id=object_id,
-        )
+        with transaction.atomic():
+            notification, created = Notification.objects.select_for_update().get_or_create(
+                recipient=recipient,
+                actor=actor,
+                notification_type=notification_type,
+                object_id=object_id,
+                defaults={
+                    "is_read": False,
+                    "created_at": timezone.now(),
+                }
+            )
 
-        if created:
-            logger.info(
-                f"Notification created: {actor.username} -> {recipient.username} ({notification_type})"
-            )
-        else:
-            logger.info(
-                f"Notification already exists: {actor.username} -> {recipient.username} ({notification_type})"
-            )
+            if not created:
+                notification.is_read = False
+                notification.created_at = timezone.now()
+                notification.save(update_fields=["is_read", "created_at"])
+                logger.info(
+                    f"Notification updated: {actor.username} -> {recipient.username} ({notification_type})"
+                )
+            else:
+                logger.info(
+                    f"Notification created: {actor.username} -> {recipient.username} ({notification_type})"
+                )
 
     except User.DoesNotExist:
         logger.error(f"User not found when creating notification: recipient={recipient_id}, actor={actor_id}")
@@ -58,16 +69,17 @@ def send_notification_task(
 
 
 @shared_task
-def send_comment_notification(comment_id, actor_id):
+def send_comment_notification(task_id, actor_id, comment_id=None):
     """
     Send notification when a comment is created.
     The notification goes to the task owner.
+    
+    Uses task.id as object_id for deduplication.
     """
-    from tasks.models import Comment
+    from tasks.models import Task
 
     try:
-        comment = Comment.objects.get(id=comment_id)
-        task = comment.task
+        task = Task.objects.get(id=task_id)
 
         if not task.user:
             logger.info(f"Skipping comment notification: Task {task.id} has no owner")
@@ -83,30 +95,31 @@ def send_comment_notification(comment_id, actor_id):
             recipient_id=task.user.id,
             actor_id=actor_id,
             notification_type=Notification.NotificationType.COMMENT,
-            object_id=comment.id,
+            object_id=task.id,
         )
 
         logger.info(
             f"Comment notification queued: user {actor_id} commented on task {task.id} owned by {task.user.id}"
         )
 
-    except Comment.DoesNotExist:
-        logger.error(f"Comment not found: {comment_id}")
+    except Task.DoesNotExist:
+        logger.error(f"Task not found: {task_id}")
     except Exception as e:
         logger.error(f"Error sending comment notification: {str(e)}")
 
 
 @shared_task
-def send_like_notification(like_id, actor_id):
+def send_like_notification(task_id, actor_id, like_id=None):
     """
     Send notification when a like is created.
     The notification goes to the task owner.
+    
+    Uses task.id as object_id for deduplication.
     """
-    from tasks.models import Like
+    from tasks.models import Task
 
     try:
-        like = Like.objects.get(id=like_id)
-        task = like.task
+        task = Task.objects.get(id=task_id)
 
         if not task.user:
             logger.info(f"Skipping like notification: Task {task.id} has no owner")
@@ -122,14 +135,14 @@ def send_like_notification(like_id, actor_id):
             recipient_id=task.user.id,
             actor_id=actor_id,
             notification_type=Notification.NotificationType.LIKE,
-            object_id=like.id,
+            object_id=task.id,
         )
 
         logger.info(
             f"Like notification queued: user {actor_id} liked task {task.id} owned by {task.user.id}"
         )
 
-    except Like.DoesNotExist:
-        logger.error(f"Like not found: {like_id}")
+    except Task.DoesNotExist:
+        logger.error(f"Task not found: {task_id}")
     except Exception as e:
         logger.error(f"Error sending like notification: {str(e)}")
